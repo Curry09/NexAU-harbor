@@ -1,0 +1,18 @@
+type: agent
+name: test_agent
+max_context_tokens: 100000
+system_prompt: ""
+system_prompt_type: string
+tool_call_mode: openai
+llm_config:
+  temperature: 0.7
+  max_tokens: 8192
+  api_type: openai_chat_completion
+
+tracers:
+  # - import: nexau.archs.tracer.adapters.langfuse:LangfuseTracer
+  #   params:
+  #     public_key: ${env.LANGFUSE_PUBLIC_KEY}
+  #     secret_key: ${env.LANGFUSE_SECRET_KEY}
+  #     host: ${env.LANGFUSE_HOST}
+  - import: nexau.archs.tracer.adapters.in_memory:InMemoryTracer
