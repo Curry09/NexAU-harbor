@@ -213,3 +213,29 @@ def web_fetch(prompt: str) -> str:
             "error": f"Error processing web fetch: {str(e)}",
             "type": "FETCH_ERROR",
         })
+
+
+if __name__ == "__main__":
+    import sys
+    
+    # 默认测试 URL
+    default_prompt = "Fetch content from https://httpbin.org/html"
+    test_prompt = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else default_prompt
+    
+    print(f"Testing web_fetch with prompt: '{test_prompt}'")
+    print("-" * 50)
+    
+    result = web_fetch(test_prompt)
+    parsed = json.loads(result)
+    
+    if parsed.get("success"):
+        print(f"URLs fetched: {parsed.get('urls_fetched', 0)}")
+        print(f"Message: {parsed.get('message', '')}")
+        print("\n--- Content Preview (first 500 chars) ---")
+        content = parsed.get('content', '')
+        print(content[:500] + "..." if len(content) > 500 else content)
+    else:
+        print(f"Error: {parsed.get('error') or parsed.get('message')}")
+        if parsed.get('errors'):
+            for err in parsed['errors']:
+                print(f"  - {err.get('url')}: {err.get('error')}")

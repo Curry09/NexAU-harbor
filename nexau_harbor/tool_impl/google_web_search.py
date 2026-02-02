@@ -189,3 +189,23 @@ def google_web_search(query: str) -> str:
             "error": f"Error during web search: {str(e)}",
             "type": "SEARCH_ERROR",
         })
+
+
+if __name__ == "__main__":
+    import sys
+    
+    # 默认测试查询
+    test_query = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Python programming language"
+    
+    print(f"Testing google_web_search with query: '{test_query}'")
+    print("-" * 50)
+    
+    result = google_web_search(test_query)
+    parsed = json.loads(result)
+    
+    if parsed.get("success"):
+        print(f"Source: {parsed.get('source', 'unknown')}")
+        print(f"\n{parsed.get('content', 'No content')}")
+    else:
+        print(f"Error: {parsed.get('error') or parsed.get('message')}")
+        print(f"Type: {parsed.get('type', 'unknown')}")

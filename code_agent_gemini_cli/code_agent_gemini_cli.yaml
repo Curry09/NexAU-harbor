@@ -15,48 +15,48 @@ tools: # Tool implementations based on gemini-cli (local Python implementations)
   # File operations - read_file, write_file, replace
   - name: read_file
     yaml_path: ./tools/read_file.tool.yaml
-    binding: tool_impl.read_file:read_file
+    binding: nexau_harbor.tool_impl.read_file:read_file
   - name: write_file
     yaml_path: ./tools/write_file.tool.yaml
-    binding: tool_impl.write_file:write_file
+    binding: nexau_harbor.tool_impl.write_file:write_file
   - name: replace
     yaml_path: ./tools/replace.tool.yaml
-    binding: tool_impl.replace:replace
+    binding: nexau_harbor.tool_impl.replace:replace
   # Search and navigation - search_file_content, glob, list_directory
   - name: search_file_content
     yaml_path: ./tools/search_file_content.tool.yaml
-    binding: tool_impl.search_file_content:search_file_content
+    binding: nexau_harbor.tool_impl.search_file_content:search_file_content
   - name: glob
     yaml_path: ./tools/glob.tool.yaml
-    binding: tool_impl.glob_tool:glob
+    binding: nexau_harbor.tool_impl.glob_tool:glob
   - name: list_directory
     yaml_path: ./tools/list_directory.tool.yaml
-    binding: tool_impl.list_directory:list_directory
+    binding: nexau_harbor.tool_impl.list_directory:list_directory
   # Shell command
   - name: run_shell_command
     yaml_path: ./tools/run_shell_command.tool.yaml
-    binding: tool_impl.run_shell_command:run_shell_command
+    binding: nexau_harbor.tool_impl.run_shell_command:run_shell_command
   # Web tools - google_web_search, web_fetch
   - name: google_web_search
     yaml_path: ./tools/google_web_search.tool.yaml
-    binding: tool_impl.google_web_search:google_web_search
+    binding: nexau_harbor.tool_impl.google_web_search:google_web_search
   - name: web_fetch
     yaml_path: ./tools/web_fetch.tool.yaml
-    binding: tool_impl.web_fetch:web_fetch
+    binding: nexau_harbor.tool_impl.web_fetch:web_fetch
   # Memory and user interaction
   - name: save_memory
     yaml_path: ./tools/save_memory.tool.yaml
-    binding: tool_impl.save_memory:save_memory
+    binding: nexau_harbor.tool_impl.save_memory:save_memory
   - name: ask_user
     yaml_path: ./tools/ask_user.tool.yaml
-    binding: tool_impl.ask_user:ask_user
+    binding: nexau_harbor.tool_impl.ask_user:ask_user
   # Task management
   - name: write_todos
     yaml_path: ./tools/write_todos.tool.yaml
-    binding: tool_impl.write_todos:write_todos
+    binding: nexau_harbor.tool_impl.write_todos:write_todos
   # Batch file reading
   - name: read_many_files
     yaml_path: ./tools/read_many_files.tool.yaml
-    binding: tool_impl.read_many_files:read_many_files
+    binding: nexau_harbor.tool_impl.read_many_files:read_many_files
 tracers:
   - import: nexau.archs.tracer.adapters.in_memory:InMemoryTracer

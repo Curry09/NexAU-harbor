@@ -11,6 +11,7 @@ dependencies = [
 nexau-harbor = "nexau_harbor.cli:main"
 
 [tool.setuptools.packages.find]
+include = ["nexau_harbor*"]
 exclude = ["harbor", "harbor.*"]
 
 [build-system]
