@@ -1,0 +1,21 @@
+type: tool
+name: activate_skill
+description: >-
+  Activates a specialized agent skill by name. Returns the skill's instructions
+  wrapped in `<activated_skill>` tags. These provide specialized guidance for
+  the current task. Use this when you identify a task that matches a skill's
+  description. ONLY use names exactly as they appear in the `<available_skills>`
+  section.
+
+  When a skill is activated, its instructions and available resources are
+  returned for you to follow.
+input_schema:
+  type: object
+  properties:
+    name:
+      type: string
+      description: The name of the skill to activate.
+  required:
+    - name
+  additionalProperties: false
+  $schema: http://json-schema.org/draft-07/schema#

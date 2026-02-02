@@ -1,0 +1,29 @@
+type: tool
+name: web_fetch
+description: >-
+  Processes content from URL(s), including local and private network addresses
+  (e.g., localhost), embedded in a prompt. Include up to 20 URLs and
+  instructions (e.g., summarize, extract specific data) directly in the 'prompt'
+  parameter.
+
+  The tool will fetch the content from the URLs and process them according to
+  the instructions provided. Supports GitHub URLs (automatically converts to raw
+  content URLs).
+input_schema:
+  type: object
+  properties:
+    prompt:
+      type: string
+      description: >-
+        A comprehensive prompt that includes the URL(s) (up to 20) to fetch and
+        specific instructions on how to process their content (e.g., "Summarize
+        https://example.com/article and extract key points from
+        https://another.com/data"). All URLs to be fetched must be valid and
+        complete, starting with "http://" or "https://", and be fully-formed
+        with a valid hostname (e.g., a domain name like "example.com" or an IP
+        address). For example, "https://example.com" is valid, but "example.com"
+        is not.
+  required:
+    - prompt
+  additionalProperties: false
+  $schema: http://json-schema.org/draft-07/schema#
