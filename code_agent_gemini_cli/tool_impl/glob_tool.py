@@ -177,14 +177,14 @@ def glob(
         abs_paths = [os.path.abspath(m) for m in matches]
         
         # Sort by modification time (newest first)
-        now = os.time() if hasattr(os, 'time') else 0
+        import time
+        current_time = time.time()
         
         # Get mtime for each file
         files_with_mtime = [(p, _get_file_mtime(p)) for p in abs_paths]
         
         # Sort: recent files first (by mtime descending), then alphabetically
         one_day = 24 * 60 * 60
-        current_time = files_with_mtime[0][1] if files_with_mtime else 0
         
         def sort_key(item: tuple[str, float]) -> tuple[int, float, str]:
             path, mtime = item
