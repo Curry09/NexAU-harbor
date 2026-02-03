@@ -30,6 +30,9 @@ tools: # Tool implementations based on gemini-cli (local Python implementations)
   - name: glob
     yaml_path: ./tools/glob.tool.yaml
     binding: nexau_harbor.tool_impl.glob_tool:glob
+  - name: list_directory
+    yaml_path: ./tools/list_directory.tool.yaml
+    binding: nexau_harbor.tool_impl.list_directory:list_directory
   # Shell command
   - name: run_shell_command
     yaml_path: ./tools/run_shell_command.tool.yaml
@@ -55,5 +58,29 @@ tools: # Tool implementations based on gemini-cli (local Python implementations)
     binding: nexau_harbor.tool_impl.complete_task:complete_task
 middlewares:
   - import: nexau_harbor.complete_task_hook:CompleteTaskMiddleware
+  # Aggressive context compaction (no LLM summarization)
+  - import: nexau_harbor.compact_context_hook:AggressiveCompactContextMiddleware
+    params:
+      max_context_tokens: 170000
+      compression_threshold: 0.3
+      preserve_ratio: 0.2
+      tool_output_token_budget: 10000
+      truncate_lines: 20
+      collapse_duplicate_tools: true
+  # ============================================================
+  # LLM State Snapshot Version (gemini-cli style <state_snapshot>)
+  # Uncomment below and comment out AggressiveCompactContextMiddleware above
+  # to enable LLM-powered context summarization
+  # ============================================================
+  # - import: nexau_harbor.compact_context_hook:StateSnapshotCompactMiddleware
+  #   params:
+  #     max_context_tokens: 200000
+  #     compression_threshold: 0.5      # Trigger at 50% (gemini-cli default)
+  #     preserve_ratio: 0.3             # Preserve 30% recent history
+  #     tool_output_token_budget: 50000 # 50k tokens per tool output
+  #     truncate_lines: 30              # Last 30 lines
+  #     llm_model: ${env.LLM_MODEL}     # Use same model as agent
+  #     # llm_client is auto-configured from agent's llm_config
+  # ============================================================
 tracers:
   - import: nexau.archs.tracer.adapters.in_memory:InMemoryTracer

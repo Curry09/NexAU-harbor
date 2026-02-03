@@ -6,6 +6,10 @@ description: >-
   
   Results are sorted with directories first, then alphabetically. Respects
   .gitignore and .geminiignore patterns by default.
+  
+  NOTE: Output is truncated to prevent context overflow. Default limit is 100
+  entries, maximum is 500. Use 'offset' parameter for pagination if there are
+  more entries.
 input_schema:
   type: object
   properties:
@@ -33,6 +37,16 @@ input_schema:
           description: >-
             Optional: Whether to respect .geminiignore patterns when listing
             files. Defaults to true.
+    limit:
+      type: integer
+      description: >-
+        Optional: Maximum number of entries to return. Default is 100, maximum
+        is 500. Use with 'offset' for pagination through large directories.
+    offset:
+      type: integer
+      description: >-
+        Optional: Number of entries to skip (for pagination). Default is 0.
+        Use 'next_offset' from previous response to get the next page.
   required:
     - dir_path
   additionalProperties: false
