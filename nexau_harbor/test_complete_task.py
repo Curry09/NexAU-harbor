@@ -24,7 +24,9 @@ query = "使用搜索工具，计算 2的十次方等于多少"
 print(f"任务: {query}")
 print("-" * 50)
 
-result = agent.run(query)
+result = agent.run(query, context={
+    "environment_context": "你正在一个名为 NexAU 的终端环境中工作，这个环境是一个基于终端的 AI 助手，你可以使用它来完成各种任务。"
+})
 
 for tracer in agent.config.tracers:
     if isinstance(tracer, InMemoryTracer):
