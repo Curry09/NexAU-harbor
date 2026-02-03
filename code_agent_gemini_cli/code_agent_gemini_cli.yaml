@@ -4,6 +4,7 @@ max_context_tokens: 200000
 system_prompt: ./nexau-gemini-cli-systemprompt.md
 system_prompt_type: jinja
 tool_call_mode: openai # xml, openai or anthorpic
+max_iterations: 300
 llm_config: # Support environment variable replacement in YAML config
   model: ${env.LLM_MODEL}
   base_url: ${env.LLM_BASE_URL}
@@ -58,5 +59,11 @@ tools: # Tool implementations based on gemini-cli (local Python implementations)
   - name: read_many_files
     yaml_path: ./tools/read_many_files.tool.yaml
     binding: nexau_harbor.tool_impl.read_many_files:read_many_files
+  # Task completion (mandatory termination protocol)
+  - name: complete_task
+    yaml_path: ./tools/complete_task.tool.yaml
+    binding: nexau_harbor.tool_impl.complete_task:complete_task
+middlewares:
+  - import: nexau_harbor.complete_task_hook:CompleteTaskMiddleware
 tracers:
   - import: nexau.archs.tracer.adapters.in_memory:InMemoryTracer

@@ -18,6 +18,7 @@ from .save_memory import save_memory
 from .ask_user import ask_user
 from .write_todos import write_todos
 from .read_many_files import read_many_files
+from .complete_task import complete_task
 
 __all__ = [
     "read_file",
@@ -33,4 +34,5 @@ __all__ = [
     "ask_user",
     "write_todos",
     "read_many_files",
+    "complete_task",
 ]
