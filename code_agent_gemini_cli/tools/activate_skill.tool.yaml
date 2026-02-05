@@ -6,9 +6,6 @@ description: >-
   the current task. Use this when you identify a task that matches a skill's
   description. ONLY use names exactly as they appear in the `<available_skills>`
   section.
-
-  When a skill is activated, its instructions and available resources are
-  returned for you to follow.
 input_schema:
   type: object
   properties:

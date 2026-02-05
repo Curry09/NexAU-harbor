@@ -1,145 +1,126 @@
-# Copyright 2025 Google LLC (adapted from gemini-cli)
+# Copyright 2025 Google LLC
 # SPDX-License-Identifier: Apache-2.0
 """
-write_todos tool - Manages task lists for complex operations.
+write_todos tool - Manages a list of subtasks for complex queries.
 
 Based on gemini-cli's write-todos.ts implementation.
+Helps track progress and organize complex multi-step tasks.
 """
 
-import json
 from typing import Any
 
 
 # Valid todo statuses
-VALID_STATUSES = ["pending", "in_progress", "completed", "cancelled"]
+TODO_STATUSES = ["pending", "in_progress", "completed", "cancelled"]
 
 
-def write_todos(todos: list[dict[str, Any]]) -> str:
+def write_todos(
+    todos: list[dict[str, str]],
+) -> dict[str, Any]:
     """
-    Updates or creates a todo list for tracking subtasks.
+    Lists out subtasks required to complete a user request.
     
-    Use this for complex queries requiring multiple steps.
-    Each todo should have:
-    - description: The task description
-    - status: 'pending', 'in_progress', 'completed', or 'cancelled'
+    This tool helps track progress, organize complex queries, and ensure
+    no steps are missed. The user can see current progress being made.
     
-    Guidelines:
-    - Only one task should be 'in_progress' at a time
-    - Mark tasks as 'in_progress' before starting work
-    - Update status immediately when completing/cancelling
+    Task state definitions:
+    - pending: Work has not begun on a given subtask.
+    - in_progress: Marked just prior to beginning work. Only one subtask
+      should be in_progress at a time.
+    - completed: Subtask was successfully completed with no errors.
+    - cancelled: Subtask is no longer needed due to dynamic nature of task.
     
     Args:
-        todos: Array of todo items with description and status
+        todos: The complete list of todo items. Each item should have:
+               - description: The description of the task
+               - status: The current status (pending/in_progress/completed/cancelled)
         
     Returns:
-        JSON string with the updated todo list
+        Dict with llmContent and returnDisplay matching gemini-cli format
     """
     try:
-        # Validate input
+        # Validate todos parameter
         if not isinstance(todos, list):
-            return json.dumps({
-                "success": False,
-                "error": "'todos' must be an array.",
-                "type": "INVALID_INPUT",
-            })
+            return {
+                "llmContent": "`todos` parameter must be an array",
+                "returnDisplay": "Error: Invalid todos parameter.",
+                "error": {
+                    "message": "`todos` parameter must be an array",
+                    "type": "INVALID_PARAMETER",
+                },
+            }
         
-        # Validate each todo
-        validated_todos = []
-        in_progress_count = 0
-        
+        # Validate each todo item
         for i, todo in enumerate(todos):
             if not isinstance(todo, dict):
-                return json.dumps({
-                    "success": False,
-                    "error": f"Todo {i + 1}: Must be an object.",
-                    "type": "INVALID_TODO",
-                })
+                return {
+                    "llmContent": "Each todo item must be an object",
+                    "returnDisplay": "Error: Invalid todo item.",
+                    "error": {
+                        "message": "Each todo item must be an object",
+                        "type": "INVALID_PARAMETER",
+                    },
+                }
             
             description = todo.get("description", "")
+            if not isinstance(description, str) or not description.strip():
+                return {
+                    "llmContent": "Each todo must have a non-empty description string",
+                    "returnDisplay": "Error: Missing or empty description.",
+                    "error": {
+                        "message": "Each todo must have a non-empty description string",
+                        "type": "INVALID_PARAMETER",
+                    },
+                }
+            
             status = todo.get("status", "")
-            
-            if not description or not description.strip():
-                return json.dumps({
-                    "success": False,
-                    "error": f"Todo {i + 1}: 'description' is required and must be non-empty.",
-                    "type": "MISSING_DESCRIPTION",
-                })
-            
-            if status not in VALID_STATUSES:
-                return json.dumps({
-                    "success": False,
-                    "error": f"Todo {i + 1}: Invalid status '{status}'. Must be one of: {', '.join(VALID_STATUSES)}",
-                    "type": "INVALID_STATUS",
-                })
-            
-            if status == "in_progress":
-                in_progress_count += 1
-            
-            validated_todos.append({
-                "index": i + 1,
-                "description": description.strip(),
-                "status": status,
-            })
+            if status not in TODO_STATUSES:
+                return {
+                    "llmContent": f"Each todo must have a valid status ({', '.join(TODO_STATUSES)})",
+                    "returnDisplay": "Error: Invalid status.",
+                    "error": {
+                        "message": f"Each todo must have a valid status ({', '.join(TODO_STATUSES)})",
+                        "type": "INVALID_PARAMETER",
+                    },
+                }
         
-        # Validate only one in_progress
+        # Check that only one task is in_progress
+        in_progress_count = sum(
+            1 for todo in todos if todo.get("status") == "in_progress"
+        )
+        
         if in_progress_count > 1:
-            return json.dumps({
-                "success": False,
-                "error": f"Only one task can be 'in_progress' at a time. Found {in_progress_count}.",
-                "type": "MULTIPLE_IN_PROGRESS",
-            })
+            return {
+                "llmContent": 'Invalid parameters: Only one task can be "in_progress" at a time.',
+                "returnDisplay": "Error: Multiple in_progress tasks.",
+                "error": {
+                    "message": 'Only one task can be "in_progress" at a time.',
+                    "type": "INVALID_PARAMETER",
+                },
+            }
         
-        # Build formatted todo list
-        if not validated_todos:
-            return json.dumps({
-                "success": True,
-                "message": "Todo list cleared.",
-                "todos": [],
-                "count": 0,
-            })
+        # Build the todo list string
+        if todos:
+            todo_list_string = "\n".join(
+                f"{i + 1}. [{todo['status']}] {todo['description']}"
+                for i, todo in enumerate(todos)
+            )
+            llm_content = f"Successfully updated the todo list. The current list is now:\n{todo_list_string}"
+        else:
+            llm_content = "Successfully cleared the todo list."
         
-        # Status symbols
-        status_symbols = {
-            "pending": "○",
-            "in_progress": "◉",
-            "completed": "✓",
-            "cancelled": "✗",
+        return {
+            "llmContent": llm_content,
+            "returnDisplay": {"todos": todos},
         }
         
-        formatted_lines = []
-        for todo in validated_todos:
-            symbol = status_symbols.get(todo["status"], "?")
-            formatted_lines.append(f"{todo['index']}. [{symbol}] [{todo['status']}] {todo['description']}")
-        
-        # Count by status
-        counts = {status: 0 for status in VALID_STATUSES}
-        for todo in validated_todos:
-            counts[todo["status"]] += 1
-        
-        summary_parts = []
-        if counts["completed"]:
-            summary_parts.append(f"{counts['completed']} completed")
-        if counts["in_progress"]:
-            summary_parts.append(f"{counts['in_progress']} in progress")
-        if counts["pending"]:
-            summary_parts.append(f"{counts['pending']} pending")
-        if counts["cancelled"]:
-            summary_parts.append(f"{counts['cancelled']} cancelled")
-        
-        summary = ", ".join(summary_parts) if summary_parts else "empty"
-        
-        return json.dumps({
-            "success": True,
-            "message": f"Successfully updated the todo list. Current status: {summary}.",
-            "todos": validated_todos,
-            "count": len(validated_todos),
-            "summary": counts,
-            "formatted": "\n".join(formatted_lines),
-        }, ensure_ascii=False)
-        
     except Exception as e:
-        return json.dumps({
-            "success": False,
-            "error": f"Error updating todos: {str(e)}",
-            "type": "TODO_ERROR",
-        })
+        error_msg = f"Error updating todos: {str(e)}"
+        return {
+            "llmContent": error_msg,
+            "returnDisplay": error_msg,
+            "error": {
+                "message": error_msg,
+                "type": "WRITE_TODOS_ERROR",
+            },
+        }

@@ -1,20 +1,20 @@
-# Copyright 2025 Google LLC (adapted from gemini-cli)
+# Copyright 2025 Google LLC
 # SPDX-License-Identifier: Apache-2.0
 """
 read_file tool - Reads and returns the content of a specified file.
 
 Based on gemini-cli's read-file.ts implementation.
+Handles text, images, audio files, and PDF files.
 """
 
 import base64
-import json
 import mimetypes
 import os
 from pathlib import Path
 from typing import Any
 
 
-# Configuration constants
+# Configuration constants matching gemini-cli
 DEFAULT_LINE_LIMIT = 2000
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
 
@@ -61,8 +61,20 @@ def _is_binary_file(file_path: str) -> bool:
     return ext in IMAGE_EXTENSIONS or ext in AUDIO_EXTENSIONS or ext == PDF_EXTENSION
 
 
+def _detect_file_type(file_path: str) -> str:
+    """Detect file type based on extension."""
+    ext = Path(file_path).suffix.lower()
+    if ext in IMAGE_EXTENSIONS:
+        return "image"
+    elif ext in AUDIO_EXTENSIONS:
+        return "audio"
+    elif ext == PDF_EXTENSION:
+        return "pdf"
+    return "text"
+
+
 def _read_binary_file(file_path: str) -> dict[str, Any]:
-    """Read binary file and return base64 encoded content."""
+    """Read binary file and return as inline data part for LLM."""
     ext = Path(file_path).suffix.lower()
     
     with open(file_path, "rb") as f:
@@ -79,11 +91,12 @@ def _read_binary_file(file_path: str) -> dict[str, Any]:
         else:
             mime_type = "application/octet-stream"
     
+    # Return in a format suitable for LLM (inline_data part)
     return {
-        "type": "binary",
-        "media_type": mime_type,
-        "base64": base64.b64encode(content).decode("utf-8"),
-        "size": len(content),
+        "inlineData": {
+            "mimeType": mime_type,
+            "data": base64.b64encode(content).decode("utf-8"),
+        }
     }
 
 
@@ -91,7 +104,7 @@ def read_file(
     file_path: str,
     offset: int | None = None,
     limit: int | None = None,
-) -> str:
+) -> dict[str, Any]:
     """
     Reads and returns the content of a specified file.
     
@@ -108,7 +121,7 @@ def read_file(
         limit: Optional maximum number of lines to read
         
     Returns:
-        JSON string with file content or error
+        Dict with llmContent and returnDisplay matching gemini-cli format
     """
     try:
         # Resolve path
@@ -116,31 +129,49 @@ def read_file(
         
         # Check if file exists
         if not os.path.exists(resolved_path):
-            return json.dumps({
-                "error": f"File not found: {file_path}",
-                "type": "FILE_NOT_FOUND",
-            })
+            error_msg = f"File not found: {file_path}"
+            return {
+                "llmContent": error_msg,
+                "returnDisplay": "File not found.",
+                "error": {
+                    "message": error_msg,
+                    "type": "FILE_NOT_FOUND",
+                },
+            }
         
         # Check if it's a directory
         if os.path.isdir(resolved_path):
-            return json.dumps({
-                "error": f"Path is a directory, not a file: {file_path}",
-                "type": "PATH_IS_DIRECTORY",
-            })
+            error_msg = f"Path is a directory, not a file: {file_path}"
+            return {
+                "llmContent": error_msg,
+                "returnDisplay": "Path is a directory.",
+                "error": {
+                    "message": error_msg,
+                    "type": "PATH_IS_DIRECTORY",
+                },
+            }
         
         # Check file size
         file_size = os.path.getsize(resolved_path)
         if file_size > MAX_FILE_SIZE_BYTES:
-            return json.dumps({
-                "error": f"File too large ({file_size} bytes). Maximum size is {MAX_FILE_SIZE_BYTES} bytes.",
-                "type": "FILE_TOO_LARGE",
-            })
+            error_msg = f"File too large ({file_size} bytes). Maximum size is {MAX_FILE_SIZE_BYTES} bytes."
+            return {
+                "llmContent": error_msg,
+                "returnDisplay": "File too large.",
+                "error": {
+                    "message": error_msg,
+                    "type": "FILE_TOO_LARGE",
+                },
+            }
         
-        # Handle binary files
+        # Handle binary files (images, audio, PDF)
         if _is_binary_file(resolved_path):
-            result = _read_binary_file(resolved_path)
-            result["file_path"] = file_path
-            return json.dumps(result)
+            binary_content = _read_binary_file(resolved_path)
+            file_type = _detect_file_type(resolved_path)
+            return {
+                "llmContent": binary_content,
+                "returnDisplay": f"Read {file_type} file: {file_path}",
+            }
         
         # Read text file
         encoding = _detect_encoding(resolved_path)
@@ -169,33 +200,43 @@ def read_file(
         # Add line numbers
         content_with_lines = _add_line_numbers(content, start_line + 1)
         
-        result: dict[str, Any] = {
-            "type": "text",
-            "file_path": file_path,
-            "content": content_with_lines,
-            "lines_shown": [start_line + 1, start_line + lines_shown],
-            "total_lines": total_lines,
-        }
-        
+        # Build result matching gemini-cli format
         if is_truncated:
             next_offset = start_line + lines_shown
-            result["truncated"] = True
-            result["next_offset"] = next_offset
-            result["message"] = (
-                f"File content has been truncated. "
-                f"Showing lines {start_line + 1}-{start_line + lines_shown} of {total_lines} total lines. "
-                f"To read more, use offset: {next_offset}."
-            )
+            llm_content = f"""
+IMPORTANT: The file content has been truncated.
+Status: Showing lines {start_line + 1}-{start_line + lines_shown} of {total_lines} total lines.
+Action: To read more of the file, you can use the 'offset' and 'limit' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use offset: {next_offset}.
+
+--- FILE CONTENT (truncated) ---
+{content_with_lines}"""
+            return_display = f"Showing lines {start_line + 1}-{start_line + lines_shown} of {total_lines}"
+        else:
+            llm_content = content_with_lines
+            return_display = f"Read {total_lines} lines"
         
-        return json.dumps(result, ensure_ascii=False)
+        return {
+            "llmContent": llm_content,
+            "returnDisplay": return_display,
+        }
         
     except PermissionError:
-        return json.dumps({
-            "error": f"Permission denied: {file_path}",
-            "type": "PERMISSION_DENIED",
-        })
+        error_msg = f"Permission denied: {file_path}"
+        return {
+            "llmContent": error_msg,
+            "returnDisplay": "Permission denied.",
+            "error": {
+                "message": error_msg,
+                "type": "PERMISSION_DENIED",
+            },
+        }
     except Exception as e:
-        return json.dumps({
-            "error": f"Error reading file: {str(e)}",
-            "type": "READ_ERROR",
-        })
+        error_msg = f"Error reading file: {str(e)}"
+        return {
+            "llmContent": error_msg,
+            "returnDisplay": "Error reading file.",
+            "error": {
+                "message": error_msg,
+                "type": "READ_ERROR",
+            },
+        }

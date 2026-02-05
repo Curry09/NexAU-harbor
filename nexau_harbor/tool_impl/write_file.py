@@ -1,127 +1,203 @@
-# Copyright 2025 Google LLC (adapted from gemini-cli)
+# Copyright 2025 Google LLC
 # SPDX-License-Identifier: Apache-2.0
 """
-write_file tool - Writes content to a specified file in the local filesystem.
+write_file tool - Writes content to a specified file.
 
 Based on gemini-cli's write-file.ts implementation.
 """
 
-import json
+import difflib
 import os
 from pathlib import Path
 from typing import Any
 
 
 def _detect_line_ending(content: str) -> str:
-    """Detect the dominant line ending in content."""
+    """Detect the line ending used in content."""
     if "\r\n" in content:
         return "\r\n"
     elif "\n" in content:
         return "\n"
-    elif "\r" in content:
-        return "\r"
-    return "\n"
+    return os.linesep
 
 
-def _ensure_parent_dirs(file_path: str) -> None:
-    """Create parent directories if they don't exist."""
+def _ensure_parent_dir(file_path: str) -> None:
+    """Ensure the parent directory exists."""
     parent = Path(file_path).parent
-    if parent and not parent.exists():
+    if not parent.exists():
         parent.mkdir(parents=True, exist_ok=True)
+
+
+def _generate_diff(
+    file_path: str,
+    original_content: str,
+    new_content: str,
+) -> str:
+    """Generate a unified diff between original and new content."""
+    original_lines = original_content.splitlines(keepends=True)
+    new_lines = new_content.splitlines(keepends=True)
+    
+    diff = difflib.unified_diff(
+        original_lines,
+        new_lines,
+        fromfile=f"Original: {file_path}",
+        tofile=f"Written: {file_path}",
+        lineterm="",
+    )
+    
+    return "".join(diff)
+
+
+def _get_diff_stat(original_content: str, new_content: str) -> dict[str, int]:
+    """Calculate diff statistics."""
+    original_lines = set(original_content.splitlines())
+    new_lines = set(new_content.splitlines())
+    
+    added = len(new_lines - original_lines)
+    removed = len(original_lines - new_lines)
+    
+    return {"added": added, "removed": removed}
 
 
 def write_file(
     file_path: str,
     content: str,
-) -> str:
+    modified_by_user: bool = False,
+    ai_proposed_content: str | None = None,
+) -> dict[str, Any]:
     """
     Writes content to a specified file in the local filesystem.
     
-    Creates parent directories if they don't exist.
-    Overwrites the file if it already exists.
+    The user has the ability to modify `content`. If modified, this will be
+    stated in the response.
     
     Args:
         file_path: The path to the file to write to
         content: The content to write to the file
+        modified_by_user: Whether the proposed content was modified by the user
+        ai_proposed_content: Initially proposed content (if modified_by_user is True)
         
     Returns:
-        JSON string with operation result
+        Dict with llmContent and returnDisplay matching gemini-cli format
     """
     try:
+        # Validate file_path
+        if not file_path or not file_path.strip():
+            error_msg = 'Missing or empty "file_path"'
+            return {
+                "llmContent": error_msg,
+                "returnDisplay": "Error: Missing file path.",
+                "error": {
+                    "message": error_msg,
+                    "type": "INVALID_FILE_PATH",
+                },
+            }
+        
         # Resolve path
         resolved_path = os.path.abspath(file_path)
         
         # Check if it's a directory
         if os.path.isdir(resolved_path):
-            return json.dumps({
-                "error": f"Path is a directory, not a file: {file_path}",
-                "type": "TARGET_IS_DIRECTORY",
-                "success": False,
-            })
+            error_msg = f"Path is a directory, not a file: {resolved_path}"
+            return {
+                "llmContent": error_msg,
+                "returnDisplay": "Error: Path is a directory.",
+                "error": {
+                    "message": error_msg,
+                    "type": "TARGET_IS_DIRECTORY",
+                },
+            }
         
-        # Check if file exists (for determining operation type)
+        # Check if file exists for diff
         file_exists = os.path.exists(resolved_path)
-        operation = "update" if file_exists else "create"
-        
-        # Read original content if file exists (for comparison)
+        is_new_file = not file_exists
         original_content = ""
-        original_line_ending = "\n"
-        encoding = "utf-8"
         
         if file_exists:
             try:
                 with open(resolved_path, "r", encoding="utf-8") as f:
                     original_content = f.read()
-                original_line_ending = _detect_line_ending(original_content)
             except UnicodeDecodeError:
-                pass  # Will use default encoding
+                try:
+                    with open(resolved_path, "r", encoding="latin-1") as f:
+                        original_content = f.read()
+                except Exception:
+                    pass
         
-        # Create parent directories
-        _ensure_parent_dirs(resolved_path)
-        
-        # Preserve line endings if updating
+        # Determine line ending to use
         final_content = content
-        if file_exists and original_line_ending == "\r\n":
-            # Convert to CRLF if original was CRLF
-            final_content = content.replace("\r\n", "\n").replace("\n", "\r\n")
+        if not is_new_file and original_content:
+            line_ending = _detect_line_ending(original_content)
+            if line_ending == "\r\n":
+                # Normalize to CRLF if original file used it
+                final_content = final_content.replace("\r\n", "\n").replace("\n", "\r\n")
         
-        # Write file
-        with open(resolved_path, "w", encoding=encoding, newline="") as f:
+        # Ensure parent directory exists
+        _ensure_parent_dir(resolved_path)
+        
+        # Write the file
+        with open(resolved_path, "w", encoding="utf-8") as f:
             f.write(final_content)
         
-        # Calculate stats
-        num_lines = len(final_content.splitlines())
+        # Generate diff for display
+        file_diff = _generate_diff(resolved_path, original_content, final_content)
+        diff_stat = _get_diff_stat(original_content, final_content)
         
-        result: dict[str, Any] = {
-            "success": True,
-            "operation": operation,
-            "file_path": file_path,
-            "num_lines": num_lines,
-            "message": (
-                f"Successfully created and wrote to new file: {file_path}."
-                if operation == "create"
-                else f"Successfully overwrote file: {file_path}."
-            ),
+        # Build success message (matching gemini-cli format)
+        if is_new_file:
+            llm_message = f"Successfully created and wrote to new file: {resolved_path}."
+        else:
+            llm_message = f"Successfully overwrote file: {resolved_path}."
+        
+        if modified_by_user:
+            llm_message += f" User modified the `content` to be: {content}"
+        
+        return {
+            "llmContent": llm_message,
+            "returnDisplay": {
+                "fileDiff": file_diff,
+                "fileName": os.path.basename(resolved_path),
+                "filePath": resolved_path,
+                "originalContent": original_content,
+                "newContent": final_content,
+                "diffStat": diff_stat,
+                "isNewFile": is_new_file,
+            },
         }
         
-        return json.dumps(result, ensure_ascii=False)
-        
     except PermissionError:
-        return json.dumps({
-            "error": f"Permission denied: {file_path}",
-            "type": "PERMISSION_DENIED",
-            "success": False,
-        })
+        error_msg = f"Permission denied writing to file: {file_path}"
+        return {
+            "llmContent": error_msg,
+            "returnDisplay": error_msg,
+            "error": {
+                "message": error_msg,
+                "type": "PERMISSION_DENIED",
+            },
+        }
     except OSError as e:
-        error_type = "NO_SPACE_LEFT" if "No space left" in str(e) else "WRITE_ERROR"
-        return json.dumps({
-            "error": f"Error writing file: {str(e)}",
-            "type": error_type,
-            "success": False,
-        })
+        if e.errno == 28:  # ENOSPC
+            error_msg = f"No space left on device: {file_path}"
+            error_type = "NO_SPACE_LEFT"
+        else:
+            error_msg = f"Error writing to file '{file_path}': {str(e)}"
+            error_type = "FILE_WRITE_FAILURE"
+        
+        return {
+            "llmContent": error_msg,
+            "returnDisplay": error_msg,
+            "error": {
+                "message": error_msg,
+                "type": error_type,
+            },
+        }
     except Exception as e:
-        return json.dumps({
-            "error": f"Unexpected error: {str(e)}",
-            "type": "WRITE_ERROR",
-            "success": False,
-        })
+        error_msg = f"Error writing to file: {str(e)}"
+        return {
+            "llmContent": error_msg,
+            "returnDisplay": error_msg,
+            "error": {
+                "message": error_msg,
+                "type": "FILE_WRITE_FAILURE",
+            },
+        }

@@ -7,12 +7,6 @@ description: >-
   file using the 'offset' and 'limit' parameters. Handles text, images (PNG,
   JPG, GIF, WEBP, SVG, BMP), audio files (MP3, WAV, AIFF, AAC, OGG, FLAC), and
   PDF files. For text files, it can read specific line ranges.
-
-  Usage:
-  - The file_path parameter can be an absolute or relative path
-  - You can optionally specify a line offset and limit for paginating large files
-  - For Jupyter notebooks (.ipynb files), consider using a dedicated notebook reader
-  - You have the capability to call multiple tools in a single response
 input_schema:
   type: object
   properties:

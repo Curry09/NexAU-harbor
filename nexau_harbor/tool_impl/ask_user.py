@@ -1,147 +1,192 @@
-# Copyright 2025 Google LLC (adapted from gemini-cli)
+# Copyright 2025 Google LLC
 # SPDX-License-Identifier: Apache-2.0
 """
-ask_user tool - Asks the user questions to gather preferences.
+ask_user tool - Asks the user questions to gather preferences or clarify requirements.
 
 Based on gemini-cli's ask-user.ts implementation.
-Note: In a CLI context, this returns the questions for the user to answer.
+Supports multiple question types: choice, text, and yesno.
 """
 
 import json
 from typing import Any
 
 
-def ask_user(questions: list[dict[str, Any]]) -> str:
+# Question types
+QUESTION_TYPE_CHOICE = "choice"
+QUESTION_TYPE_TEXT = "text"
+QUESTION_TYPE_YESNO = "yesno"
+
+
+def ask_user(
+    questions: list[dict[str, Any]],
+    user_answers: dict[str, str] | None = None,
+    was_cancelled: bool = False,
+) -> dict[str, Any]:
     """
-    Asks the user one or more questions.
+    Ask the user one or more questions to gather preferences, clarify requirements,
+    or make decisions.
     
-    Supports three question types:
-    - 'choice': Multiple choice with options (2-4 options)
-    - 'text': Free-form text input
-    - 'yesno': Yes/No confirmation
+    Question types:
+    - choice: Multiple-choice with options (default). Requires 2-4 options.
+    - text: Free-form text input.
+    - yesno: Yes/No confirmation.
     
     Args:
-        questions: Array of question objects with:
-            - question: The question text
-            - header: Short label (max 12 chars)
-            - type: 'choice', 'text', or 'yesno' (default: 'choice')
-            - options: For 'choice' type, array of {label, description}
-            - multiSelect: For 'choice' type, allow multiple selections
-            - placeholder: For 'text' type, hint text
-            
+        questions: List of question objects, each containing:
+            - question: The complete question to ask
+            - header: Short label (max 12 chars) displayed as chip/tag
+            - type: Question type (choice/text/yesno), defaults to choice
+            - options: For choice type, list of {label, description} objects
+            - multiSelect: For choice type, allow multiple selections
+            - placeholder: For text type, hint text
+        user_answers: Dict mapping question index to user's answer
+        was_cancelled: Whether user dismissed the dialog
+        
     Returns:
-        JSON string with the questions formatted for user response
+        Dict with llmContent and returnDisplay matching gemini-cli format
     """
     try:
-        # Validate input
+        # Validate questions
         if not questions or not isinstance(questions, list):
-            return json.dumps({
-                "error": "At least one question is required.",
-                "type": "INVALID_INPUT",
-            })
+            return {
+                "llmContent": "At least one question is required.",
+                "returnDisplay": "Error: No questions provided.",
+                "error": {
+                    "message": "At least one question is required.",
+                    "type": "INVALID_PARAMETER",
+                },
+            }
         
         if len(questions) > 4:
-            return json.dumps({
-                "error": "Maximum 4 questions allowed.",
-                "type": "TOO_MANY_QUESTIONS",
-            })
+            return {
+                "llmContent": "Maximum 4 questions allowed.",
+                "returnDisplay": "Error: Too many questions.",
+                "error": {
+                    "message": "Maximum 4 questions allowed.",
+                    "type": "INVALID_PARAMETER",
+                },
+            }
         
         # Validate each question
-        validated_questions = []
         for i, q in enumerate(questions):
-            if not isinstance(q, dict):
-                return json.dumps({
-                    "error": f"Question {i + 1}: Must be an object.",
-                    "type": "INVALID_QUESTION",
-                })
+            question_type = q.get("type", QUESTION_TYPE_CHOICE)
             
-            question_text = q.get("question", "")
-            header = q.get("header", "")
-            q_type = q.get("type", "choice")
-            options = q.get("options", [])
+            # Validate required fields
+            if not q.get("question"):
+                return {
+                    "llmContent": f"Question {i + 1}: 'question' is required.",
+                    "returnDisplay": "Error: Missing question text.",
+                    "error": {
+                        "message": f"Question {i + 1}: 'question' is required.",
+                        "type": "INVALID_PARAMETER",
+                    },
+                }
             
-            if not question_text:
-                return json.dumps({
-                    "error": f"Question {i + 1}: 'question' is required.",
-                    "type": "MISSING_QUESTION",
-                })
+            if not q.get("header"):
+                return {
+                    "llmContent": f"Question {i + 1}: 'header' is required.",
+                    "returnDisplay": "Error: Missing header.",
+                    "error": {
+                        "message": f"Question {i + 1}: 'header' is required.",
+                        "type": "INVALID_PARAMETER",
+                    },
+                }
             
-            if not header:
-                return json.dumps({
-                    "error": f"Question {i + 1}: 'header' is required.",
-                    "type": "MISSING_HEADER",
-                })
+            # Validate header length
+            if len(q.get("header", "")) > 12:
+                return {
+                    "llmContent": f"Question {i + 1}: 'header' must be at most 12 characters.",
+                    "returnDisplay": "Error: Header too long.",
+                    "error": {
+                        "message": f"Question {i + 1}: 'header' must be at most 12 characters.",
+                        "type": "INVALID_PARAMETER",
+                    },
+                }
             
-            # Validate options for choice type
-            if q_type == "choice":
+            # Validate choice type has options
+            if question_type == QUESTION_TYPE_CHOICE:
+                options = q.get("options", [])
                 if not options or len(options) < 2:
-                    return json.dumps({
-                        "error": f"Question {i + 1}: 'choice' type requires 2-4 options.",
-                        "type": "INVALID_OPTIONS",
-                    })
+                    return {
+                        "llmContent": f"Question {i + 1}: type='choice' requires 'options' array with 2-4 items.",
+                        "returnDisplay": "Error: Insufficient options.",
+                        "error": {
+                            "message": f"Question {i + 1}: type='choice' requires 'options' array with 2-4 items.",
+                            "type": "INVALID_PARAMETER",
+                        },
+                    }
                 if len(options) > 4:
-                    return json.dumps({
-                        "error": f"Question {i + 1}: Maximum 4 options allowed.",
-                        "type": "TOO_MANY_OPTIONS",
-                    })
+                    return {
+                        "llmContent": f"Question {i + 1}: 'options' array must have at most 4 items.",
+                        "returnDisplay": "Error: Too many options.",
+                        "error": {
+                            "message": f"Question {i + 1}: 'options' array must have at most 4 items.",
+                            "type": "INVALID_PARAMETER",
+                        },
+                    }
                 
-                # Validate option structure
+                # Validate each option
                 for j, opt in enumerate(options):
-                    if not isinstance(opt, dict):
-                        return json.dumps({
-                            "error": f"Question {i + 1}, option {j + 1}: Must be an object.",
-                            "type": "INVALID_OPTION",
-                        })
-                    if not opt.get("label"):
-                        return json.dumps({
-                            "error": f"Question {i + 1}, option {j + 1}: 'label' is required.",
-                            "type": "MISSING_LABEL",
-                        })
-            
-            validated_questions.append({
-                "index": i,
-                "question": question_text,
-                "header": header,
-                "type": q_type,
-                "options": options if q_type == "choice" else None,
-                "multiSelect": q.get("multiSelect", False) if q_type == "choice" else None,
-                "placeholder": q.get("placeholder") if q_type == "text" else None,
-            })
+                    if not opt.get("label") or not isinstance(opt.get("label"), str):
+                        return {
+                            "llmContent": f"Question {i + 1}, option {j + 1}: 'label' is required and must be a non-empty string.",
+                            "returnDisplay": "Error: Invalid option label.",
+                            "error": {
+                                "message": f"Question {i + 1}, option {j + 1}: 'label' is required.",
+                                "type": "INVALID_PARAMETER",
+                            },
+                        }
+                    if opt.get("description") is None or not isinstance(opt.get("description"), str):
+                        return {
+                            "llmContent": f"Question {i + 1}, option {j + 1}: 'description' is required and must be a string.",
+                            "returnDisplay": "Error: Invalid option description.",
+                            "error": {
+                                "message": f"Question {i + 1}, option {j + 1}: 'description' is required.",
+                                "type": "INVALID_PARAMETER",
+                            },
+                        }
         
-        # Format questions for display
-        formatted = []
-        for q in validated_questions:
-            q_formatted = f"\n**[{q['header']}]** {q['question']}"
-            
-            if q["type"] == "choice" and q["options"]:
-                q_formatted += "\nOptions:"
-                for j, opt in enumerate(q["options"], 1):
-                    label = opt.get("label", "")
-                    desc = opt.get("description", "")
-                    q_formatted += f"\n  {j}. {label}"
-                    if desc:
-                        q_formatted += f" - {desc}"
-                if q["multiSelect"]:
-                    q_formatted += "\n  (Multiple selections allowed)"
-            elif q["type"] == "yesno":
-                q_formatted += "\n  [Yes / No]"
-            elif q["type"] == "text":
-                if q["placeholder"]:
-                    q_formatted += f"\n  (Hint: {q['placeholder']})"
-            
-            formatted.append(q_formatted)
+        # Handle user response
+        if was_cancelled:
+            return {
+                "llmContent": "User dismissed ask_user dialog without answering.",
+                "returnDisplay": "User dismissed dialog",
+            }
         
-        # Return the formatted questions
-        return json.dumps({
-            "type": "ask_user",
-            "questions": validated_questions,
-            "formatted_display": "\n".join(formatted),
-            "message": "Please answer the following question(s):",
-            "awaiting_response": True,
-        }, ensure_ascii=False)
+        # Process answers
+        if user_answers is None:
+            user_answers = {}
+        
+        answer_entries = list(user_answers.items())
+        has_answers = len(answer_entries) > 0
+        
+        if has_answers:
+            answer_lines = []
+            for index_str, answer in answer_entries:
+                try:
+                    idx = int(index_str)
+                    question = questions[idx] if idx < len(questions) else None
+                    category = question.get("header", f"Q{index_str}") if question else f"Q{index_str}"
+                except (ValueError, IndexError):
+                    category = f"Q{index_str}"
+                answer_lines.append(f"  {category} → {answer}")
+            
+            return_display = "**User answered:**\n" + "\n".join(answer_lines)
+        else:
+            return_display = "User submitted without answering questions."
+        
+        return {
+            "llmContent": json.dumps({"answers": user_answers}),
+            "returnDisplay": return_display,
+        }
         
     except Exception as e:
-        return json.dumps({
-            "error": f"Error processing questions: {str(e)}",
-            "type": "ASK_USER_ERROR",
-        })
+        error_msg = f"Error in ask_user: {str(e)}"
+        return {
+            "llmContent": error_msg,
+            "returnDisplay": error_msg,
+            "error": {
+                "message": error_msg,
+                "type": "ASK_USER_ERROR",
+            },
+        }

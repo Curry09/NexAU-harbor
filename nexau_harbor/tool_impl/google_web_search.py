@@ -1,211 +1,142 @@
-# Copyright 2025 Google LLC (adapted from gemini-cli)
+# Copyright 2025 Google LLC
 # SPDX-License-Identifier: Apache-2.0
 """
-google_web_search tool - Performs web searches.
+google_web_search tool - Performs web searches using Google Search.
 
 Based on gemini-cli's web-search.ts implementation.
-Uses external search API or falls back to simulated response.
+Uses the Gemini API with grounding to provide search results with sources.
 """
 
-import json
-import os
 from typing import Any
 
-# Try to import requests for web searches
-try:
-    import requests
-    REQUESTS_AVAILABLE = True
-except ImportError:
-    REQUESTS_AVAILABLE = False
 
-
-def _search_with_serper(query: str, api_key: str) -> dict[str, Any] | None:
-    """Search using Serper API (Google Search API)."""
-    if not REQUESTS_AVAILABLE:
-        return None
-    
-    try:
-        response = requests.post(
-            "https://google.serper.dev/search",
-            headers={
-                "X-API-KEY": api_key,
-                "Content-Type": "application/json",
-            },
-            json={"q": query, "num": 10},
-            timeout=30,
-        )
-        
-        if response.status_code == 200:
-            return response.json()
-    except Exception:
-        pass
-    
-    return None
-
-
-def _search_with_duckduckgo(query: str) -> dict[str, Any] | None:
-    """Search using DuckDuckGo Instant Answer API."""
-    if not REQUESTS_AVAILABLE:
-        return None
-    
-    try:
-        response = requests.get(
-            "https://api.duckduckgo.com/",
-            params={"q": query, "format": "json", "no_html": 1},
-            timeout=30,
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("AbstractText") or data.get("RelatedTopics"):
-                return data
-    except Exception:
-        pass
-    
-    return None
-
-
-def _format_serper_results(data: dict[str, Any], query: str) -> str:
-    """Format Serper API results."""
-    parts = [f'Web search results for "{query}":\n']
-    
-    # Answer box
-    if "answerBox" in data:
-        ab = data["answerBox"]
-        if "answer" in ab:
-            parts.append(f"**Answer:** {ab['answer']}\n")
-        elif "snippet" in ab:
-            parts.append(f"**Snippet:** {ab['snippet']}\n")
-    
-    # Organic results
-    organic = data.get("organic", [])
-    if organic:
-        parts.append("\n**Search Results:**")
-        for i, result in enumerate(organic[:5], 1):
-            title = result.get("title", "Untitled")
-            link = result.get("link", "")
-            snippet = result.get("snippet", "")
-            parts.append(f"\n[{i}] {title}")
-            if snippet:
-                parts.append(f"    {snippet}")
-            if link:
-                parts.append(f"    URL: {link}")
-    
-    # Sources
-    if organic:
-        parts.append("\n\n**Sources:**")
-        for i, result in enumerate(organic[:5], 1):
-            title = result.get("title", "Untitled")
-            link = result.get("link", "")
-            parts.append(f"[{i}] {title} ({link})")
-    
-    return "\n".join(parts)
-
-
-def _format_duckduckgo_results(data: dict[str, Any], query: str) -> str:
-    """Format DuckDuckGo API results."""
-    parts = [f'Web search results for "{query}":\n']
-    
-    # Abstract
-    if data.get("AbstractText"):
-        parts.append(f"**Summary:** {data['AbstractText']}")
-        if data.get("AbstractURL"):
-            parts.append(f"Source: {data['AbstractURL']}")
-    
-    # Related topics
-    related = data.get("RelatedTopics", [])
-    if related:
-        parts.append("\n**Related Information:**")
-        for i, topic in enumerate(related[:5], 1):
-            if isinstance(topic, dict):
-                text = topic.get("Text", "")
-                url = topic.get("FirstURL", "")
-                if text:
-                    parts.append(f"\n[{i}] {text}")
-                    if url:
-                        parts.append(f"    URL: {url}")
-    
-    return "\n".join(parts)
-
-
-def google_web_search(query: str) -> str:
+def google_web_search(
+    query: str,
+    search_function: Any | None = None,
+) -> dict[str, Any]:
     """
-    Performs a web search using Google Search.
+    Performs a web search using Google Search (via the Gemini API).
     
-    Returns search results with sources and citations.
+    Returns search results with source citations when available.
     
     Args:
-        query: The search query
+        query: The search query to find information on the web
+        search_function: Optional external search function for testing/mocking
         
     Returns:
-        JSON string with search results
+        Dict with llmContent and returnDisplay matching gemini-cli format
     """
     try:
         # Validate query
         if not query or not query.strip():
-            return json.dumps({
-                "error": "Query cannot be empty.",
-                "type": "INVALID_QUERY",
-            })
+            return {
+                "llmContent": "The 'query' parameter cannot be empty.",
+                "returnDisplay": "Error: Empty search query.",
+                "error": {
+                    "message": "The 'query' parameter cannot be empty.",
+                    "type": "INVALID_QUERY",
+                },
+            }
         
-        # Try Serper API first (requires API key)
-        serper_key = os.environ.get("SERPER_API_KEY")
-        if serper_key:
-            result = _search_with_serper(query, serper_key)
-            if result:
-                formatted = _format_serper_results(result, query)
-                return json.dumps({
-                    "success": True,
-                    "query": query,
-                    "content": formatted,
-                    "source": "serper",
-                }, ensure_ascii=False)
+        # If a search function is provided (for testing/external integration), use it
+        if search_function:
+            try:
+                result = search_function(query)
+                
+                # Handle result format
+                if isinstance(result, dict):
+                    response_text = result.get("text", "")
+                    sources = result.get("sources", [])
+                    grounding_supports = result.get("groundingSupports", [])
+                else:
+                    response_text = str(result)
+                    sources = []
+                    grounding_supports = []
+                
+            except Exception as e:
+                error_msg = f"Error during web search for query \"{query}\": {str(e)}"
+                return {
+                    "llmContent": f"Error: {error_msg}",
+                    "returnDisplay": "Error performing web search.",
+                    "error": {
+                        "message": error_msg,
+                        "type": "WEB_SEARCH_FAILED",
+                    },
+                }
+        else:
+            # Placeholder for when no search function is provided
+            # In actual usage, this would call the Gemini API
+            return {
+                "llmContent": f"Web search for \"{query}\" requires a configured search backend. "
+                             "Please ensure the Gemini API client is properly configured.",
+                "returnDisplay": "Web search backend not configured.",
+                "error": {
+                    "message": "No search function provided.",
+                    "type": "WEB_SEARCH_NOT_CONFIGURED",
+                },
+            }
         
-        # Try DuckDuckGo as fallback
-        result = _search_with_duckduckgo(query)
-        if result:
-            formatted = _format_duckduckgo_results(result, query)
-            return json.dumps({
-                "success": True,
-                "query": query,
-                "content": formatted,
-                "source": "duckduckgo",
-            }, ensure_ascii=False)
+        # Check if we got results
+        if not response_text or not response_text.strip():
+            return {
+                "llmContent": f'No search results or information found for query: "{query}"',
+                "returnDisplay": "No information found.",
+            }
         
-        # No search results available
-        return json.dumps({
-            "success": False,
-            "query": query,
-            "message": (
-                f'No search results available for "{query}". '
-                "Web search requires either SERPER_API_KEY environment variable "
-                "or a working internet connection for DuckDuckGo."
-            ),
-            "type": "NO_RESULTS",
-        })
+        # Process sources and grounding if available
+        modified_response = response_text
+        source_list_formatted = []
+        
+        if sources:
+            for idx, source in enumerate(sources):
+                title = source.get("web", {}).get("title", "Untitled")
+                uri = source.get("web", {}).get("uri", "No URI")
+                source_list_formatted.append(f"[{idx + 1}] {title} ({uri})")
+            
+            # Insert citation markers if grounding supports are available
+            if grounding_supports:
+                insertions = []
+                for support in grounding_supports:
+                    segment = support.get("segment", {})
+                    chunk_indices = support.get("groundingChunkIndices", [])
+                    
+                    if segment and chunk_indices:
+                        citation_marker = "".join(
+                            f"[{idx + 1}]" for idx in chunk_indices
+                        )
+                        insertions.append({
+                            "index": segment.get("endIndex", 0),
+                            "marker": citation_marker,
+                        })
+                
+                # Sort insertions by index in descending order
+                insertions.sort(key=lambda x: x["index"], reverse=True)
+                
+                # Insert markers into response text
+                response_chars = list(modified_response)
+                for insertion in insertions:
+                    idx = min(insertion["index"], len(response_chars))
+                    response_chars.insert(idx, insertion["marker"])
+                
+                modified_response = "".join(response_chars)
+            
+            # Append source list
+            if source_list_formatted:
+                modified_response += "\n\nSources:\n" + "\n".join(source_list_formatted)
+        
+        return {
+            "llmContent": f'Web search results for "{query}":\n\n{modified_response}',
+            "returnDisplay": f'Search results for "{query}" returned.',
+            "sources": sources if sources else None,
+        }
         
     except Exception as e:
-        return json.dumps({
-            "error": f"Error during web search: {str(e)}",
-            "type": "SEARCH_ERROR",
-        })
-
-
-if __name__ == "__main__":
-    import sys
-    
-    # 默认测试查询
-    test_query = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Python programming language"
-    
-    print(f"Testing google_web_search with query: '{test_query}'")
-    print("-" * 50)
-    
-    result = google_web_search(test_query)
-    parsed = json.loads(result)
-    
-    if parsed.get("success"):
-        print(f"Source: {parsed.get('source', 'unknown')}")
-        print(f"\n{parsed.get('content', 'No content')}")
-    else:
-        print(f"Error: {parsed.get('error') or parsed.get('message')}")
-        print(f"Type: {parsed.get('type', 'unknown')}")
+        error_msg = f"Error during web search for query \"{query}\": {str(e)}"
+        return {
+            "llmContent": f"Error: {error_msg}",
+            "returnDisplay": "Error performing web search.",
+            "error": {
+                "message": error_msg,
+                "type": "WEB_SEARCH_FAILED",
+            },
+        }

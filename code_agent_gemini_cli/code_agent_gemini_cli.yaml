@@ -1,6 +1,6 @@
 type: agent
 name: nexau_code_agent
-max_context_tokens: 100000
+max_context_tokens: 200000
 system_prompt: ./nexau-gemini-cli-systemprompt.md
 system_prompt_type: jinja
 tool_call_mode: openai # xml, openai or anthorpic

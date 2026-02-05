@@ -1,19 +1,20 @@
-# Copyright 2025 Google LLC (adapted from gemini-cli)
+# Copyright 2025 Google LLC
 # SPDX-License-Identifier: Apache-2.0
 """
 glob tool - Finds files matching glob patterns.
 
 Based on gemini-cli's glob.ts implementation.
+Returns absolute paths sorted by modification time (newest first).
 """
 
 import fnmatch
-import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 
-# Default exclusions
+# Default exclusions matching gemini-cli
 DEFAULT_EXCLUDES = [
     "node_modules",
     ".git",
@@ -44,6 +45,32 @@ def _should_exclude(path: str, excludes: list[str]) -> bool:
             if fnmatch.fnmatch(part, pattern):
                 return True
     return False
+
+
+def _sort_file_entries(
+    entries: list[tuple[str, float]],
+    now_timestamp: float,
+    recency_threshold_ms: float,
+) -> list[str]:
+    """
+    Sorts file entries based on recency and then alphabetically.
+    Recent files (modified within recency_threshold_ms) are listed first, newest to oldest.
+    Older files are listed after recent ones, sorted alphabetically by path.
+    """
+    recency_threshold_sec = recency_threshold_ms / 1000.0
+    
+    def sort_key(item: tuple[str, float]) -> tuple[int, float, str]:
+        path, mtime = item
+        is_recent = (now_timestamp - mtime) < recency_threshold_sec
+        if is_recent:
+            # Recent files: sort by mtime descending (newer first)
+            return (0, -mtime, path)
+        else:
+            # Older files: sort alphabetically
+            return (1, 0, path)
+    
+    entries.sort(key=sort_key)
+    return [p for p, _ in entries]
 
 
 def _match_glob_pattern(
@@ -82,16 +109,7 @@ def _match_glob_pattern(
         if _should_exclude(rel_path, excludes):
             continue
         
-        # Apply case sensitivity filter if needed
-        if not case_sensitive:
-            results.append(match)
-        else:
-            # For case-sensitive, verify the match
-            base_pattern = os.path.basename(pattern.replace("**", "").replace("*", ""))
-            if base_pattern.lower() in os.path.basename(match).lower():
-                results.append(match)
-            else:
-                results.append(match)
+        results.append(match)
     
     return results
 
@@ -102,11 +120,12 @@ def glob(
     case_sensitive: bool = False,
     respect_git_ignore: bool = True,
     respect_gemini_ignore: bool = True,
-) -> str:
+) -> dict[str, Any]:
     """
     Finds files matching a glob pattern.
     
     Returns absolute paths sorted by modification time (newest first).
+    Ideal for quickly locating files based on their name or path structure.
     
     Args:
         pattern: Glob pattern (e.g., "**/*.py", "docs/*.md")
@@ -116,30 +135,44 @@ def glob(
         respect_gemini_ignore: Whether to respect .geminiignore patterns
         
     Returns:
-        JSON string with matching files
+        Dict with llmContent and returnDisplay matching gemini-cli format
     """
     try:
         # Validate pattern
         if not pattern or not pattern.strip():
-            return json.dumps({
-                "error": "Pattern cannot be empty.",
-                "type": "INVALID_PATTERN",
-            })
+            return {
+                "llmContent": "The 'pattern' parameter cannot be empty.",
+                "returnDisplay": "Error: Empty pattern",
+                "error": {
+                    "message": "The 'pattern' parameter cannot be empty.",
+                    "type": "INVALID_PATTERN",
+                },
+            }
         
         # Determine search directory
         search_dir = os.path.abspath(dir_path) if dir_path else os.getcwd()
         
         if not os.path.exists(search_dir):
-            return json.dumps({
-                "error": f"Directory does not exist: {search_dir}",
-                "type": "DIRECTORY_NOT_FOUND",
-            })
+            error_msg = f"Search path does not exist {search_dir}"
+            return {
+                "llmContent": error_msg,
+                "returnDisplay": "Error: Path not found",
+                "error": {
+                    "message": error_msg,
+                    "type": "DIRECTORY_NOT_FOUND",
+                },
+            }
         
         if not os.path.isdir(search_dir):
-            return json.dumps({
-                "error": f"Path is not a directory: {search_dir}",
-                "type": "NOT_A_DIRECTORY",
-            })
+            error_msg = f"Search path is not a directory: {search_dir}"
+            return {
+                "llmContent": error_msg,
+                "returnDisplay": "Error: Not a directory",
+                "error": {
+                    "message": error_msg,
+                    "type": "NOT_A_DIRECTORY",
+                },
+            }
         
         # Build exclusion list
         excludes = list(DEFAULT_EXCLUDES)
@@ -173,48 +206,53 @@ def glob(
         # Find matching files
         matches = _match_glob_pattern(pattern, search_dir, case_sensitive, excludes)
         
-        # Get absolute paths
-        abs_paths = [os.path.abspath(m) for m in matches]
+        # Get absolute paths with mtime (filter out any that couldn't be accessed)
+        files_with_mtime = []
+        for m in matches:
+            abs_path = os.path.abspath(m)
+            mtime = _get_file_mtime(m)
+            files_with_mtime.append((abs_path, mtime))
         
-        # Sort by modification time (newest first)
-        import time
-        current_time = time.time()
+        # Sort by modification time (newest first for recent files)
+        one_day_ms = 24 * 60 * 60 * 1000
+        now_timestamp = time.time()
+        sorted_paths = _sort_file_entries(files_with_mtime, now_timestamp, one_day_ms)
         
-        # Get mtime for each file
-        files_with_mtime = [(p, _get_file_mtime(p)) for p in abs_paths]
+        # Count ignored files
+        ignored_count = len(matches) - len(files_with_mtime)
         
-        # Sort: recent files first (by mtime descending), then alphabetically
-        one_day = 24 * 60 * 60
-        
-        def sort_key(item: tuple[str, float]) -> tuple[int, float, str]:
-            path, mtime = item
-            # Recent files (within 24h) come first
-            is_recent = (current_time - mtime) < one_day if current_time else False
-            return (0 if is_recent else 1, -mtime, path)
-        
-        files_with_mtime.sort(key=sort_key)
-        sorted_paths = [p for p, _ in files_with_mtime]
-        
-        # Build result
+        # Build result matching gemini-cli format
         if not sorted_paths:
-            return json.dumps({
-                "message": f'No files found matching pattern "{pattern}" in "{search_dir}".',
-                "files": [],
-                "count": 0,
-            })
+            message = f'No files found matching pattern "{pattern}" within {search_dir}'
+            if ignored_count > 0:
+                message += f" ({ignored_count} files were ignored)"
+            return {
+                "llmContent": message,
+                "returnDisplay": "No files found",
+            }
         
-        result: dict[str, Any] = {
-            "message": f'Found {len(sorted_paths)} file(s) matching "{pattern}" in "{search_dir}", sorted by modification time.',
-            "pattern": pattern,
-            "search_dir": search_dir,
-            "count": len(sorted_paths),
-            "files": sorted_paths,
+        file_count = len(sorted_paths)
+        file_list = "\n".join(sorted_paths)
+        
+        result_message = (
+            f'Found {file_count} file(s) matching "{pattern}" within {search_dir}'
+        )
+        if ignored_count > 0:
+            result_message += f" ({ignored_count} additional files were ignored)"
+        result_message += f", sorted by modification time (newest first):\n{file_list}"
+        
+        return {
+            "llmContent": result_message,
+            "returnDisplay": f"Found {file_count} matching file(s)",
         }
         
-        return json.dumps(result, ensure_ascii=False)
-        
     except Exception as e:
-        return json.dumps({
-            "error": f"Error during glob search: {str(e)}",
-            "type": "GLOB_ERROR",
-        })
+        error_msg = f"Error during glob search operation: {str(e)}"
+        return {
+            "llmContent": error_msg,
+            "returnDisplay": "Error: An unexpected error occurred.",
+            "error": {
+                "message": error_msg,
+                "type": "GLOB_EXECUTION_ERROR",
+            },
+        }
