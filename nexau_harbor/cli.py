@@ -270,7 +270,43 @@ def cmd_run(args):
     os.makedirs(args.log_dir_path, exist_ok=True)
     # 动态生成环境上下文
     working_dir = args.working_dir
-    environment_context = get_directory_context_string(working_dir)
+    import platform
+    from datetime import datetime
+    import locale
+
+    # Format today's date per user's locale
+    try:
+        loc = locale.getdefaultlocale()[0]
+    except Exception:
+        loc = 'en_US'
+    now = datetime.now()
+    try:
+        formatted_today = now.strftime("%A, %B %d, %Y")
+    except Exception:
+        formatted_today = now.strftime("%Y-%m-%d")
+
+    # Substitute the actual project temp directory if available; else, use a placeholder
+    import random
+    import string
+    def random_hex(n: int) -> str:
+        return ''.join(random.choices('0123456789abcdef', k=n))
+    project_tmp_dir = f"/root/.gemini/tmp/{random_hex(64)}"
+    os_type = platform.system().lower()
+
+    folder_structure = get_folder_structure(working_dir)
+
+    environment_context = (
+        "This is the Gemini CLI. We are setting up the context for our chat.\n"
+        f"Today's date is {formatted_today} (formatted according to the user's locale).\n"
+        f"My operating system is: {os_type}\n"
+        f"The project's temporary directory is: {project_tmp_dir}\n, you must first mkdir it before using it"
+        f"I'm currently working in the directory: {working_dir}\n"
+        "Here is the folder structure of the current working directories:\n\n"
+        f"Showing up to {MAX_ITEMS} items (files + folders).\n\n"
+        f"{folder_structure}\n\n"
+        "Reminder: Do not return an empty response when a tool call is required.\n\n"
+        "My setup is complete. I will provide my first command in the next turn."
+    )
     agent = load_agent_config(args.config_path)
     result = agent.run(
         args.query,

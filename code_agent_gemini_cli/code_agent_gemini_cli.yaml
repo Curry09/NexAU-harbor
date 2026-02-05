@@ -1,6 +1,6 @@
 type: agent
 name: nexau_code_agent
-max_context_tokens: 200000
+max_context_tokens: 100000
 system_prompt: ./nexau-gemini-cli-systemprompt.md
 system_prompt_type: jinja
 tool_call_mode: openai # xml, openai or anthorpic
@@ -58,15 +58,15 @@ tools: # Tool implementations based on gemini-cli (local Python implementations)
     binding: nexau_harbor.tool_impl.complete_task:complete_task
 middlewares:
   - import: nexau_harbor.complete_task_hook:CompleteTaskMiddleware
-  # Aggressive context compaction (no LLM summarization)
-  - import: nexau_harbor.compact_context_hook:AggressiveCompactContextMiddleware
-    params:
-      max_context_tokens: 170000
-      compression_threshold: 0.3
-      preserve_ratio: 0.2
-      tool_output_token_budget: 10000
-      truncate_lines: 20
-      collapse_duplicate_tools: true
+  # # Aggressive context compaction (no LLM summarization)
+  # - import: nexau_harbor.compact_context_hook:AggressiveCompactContextMiddleware
+  #   params:
+  #     max_context_tokens: 50000
+  #     compression_threshold: 0.3
+  #     preserve_ratio: 0.2
+  #     tool_output_token_budget: 10000
+  #     truncate_lines: 20
+  #     collapse_duplicate_tools: true
   # ============================================================
   # LLM State Snapshot Version (gemini-cli style <state_snapshot>)
   # Uncomment below and comment out AggressiveCompactContextMiddleware above
