@@ -309,7 +309,7 @@ def cmd_run(args):
     )
     agent = load_agent_config(args.config_path)
     result = agent.run(
-        args.query,
+        message=args.query,
         context={
             "environment_context": environment_context,
         }
