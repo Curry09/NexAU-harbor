@@ -12,6 +12,7 @@ llm_config: # Support environment variable replacement in YAML config
   temperature: 0.7
   stream: False
   api_type: openai_chat_completion # support openai_chat_completion (default), openai_responses (especially for gpt-5-codex), anthropic_chat_completion
+ 
 tools: # Tool implementations based on gemini-cli (local Python implementations)
   # File operations - read_file, write_file, replace
   - name: read_file
