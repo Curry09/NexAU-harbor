@@ -307,6 +307,10 @@ def cmd_run(args):
         "Reminder: Do not return an empty response when a tool call is required.\n\n"
         "My setup is complete. I will provide my first command in the next turn."
     )
+    config_dir = os.path.dirname(os.path.abspath(args.config_path))
+    if config_dir not in sys.path:
+        sys.path.insert(0, config_dir)
+
     agent = load_agent_config(args.config_path)
     result = agent.run(
         message=args.query,
@@ -314,6 +318,7 @@ def cmd_run(args):
             "environment_context": environment_context,
         }
     )
+
     for tracer in agent.config.tracers:
         if isinstance(tracer, InMemoryTracer):
             with open(args.log_dir_path+"/nexau_in_memory_tracer.json", "w") as f:
