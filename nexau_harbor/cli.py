@@ -7,13 +7,70 @@ NexAU Harbor CLI
 """
 
 import argparse
+import atexit
+import signal
 import sys
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 from nexau.archs.config.config_loader import load_agent_config
 from nexau.archs.tracer.adapters.in_memory import InMemoryTracer
 import json
+
+
+_tracer_save_state: dict = {"agent": None, "log_dir": None, "saved": False}
+
+TRACER_FLUSH_INTERVAL_SEC = 60
+
+
+def _dump_tracer_to_disk():
+    """Write current InMemoryTracer snapshot and history to disk (atomic via tmp+rename)."""
+    agent = _tracer_save_state.get("agent")
+    log_dir = _tracer_save_state.get("log_dir")
+    if agent is None or log_dir is None:
+        return
+    try:
+        for tracer in agent.config.tracers:
+            if isinstance(tracer, InMemoryTracer):
+                path = os.path.join(log_dir, "nexau_in_memory_tracer.json")
+                tmp_path = path + ".tmp"
+                with open(tmp_path, "w") as f:
+                    json.dump(tracer.dump_traces(), f, indent=2, ensure_ascii=False)
+                os.replace(tmp_path, path)
+                break
+    except Exception as e:
+        sys.stderr.write(f"[nexau-harbor] failed to flush tracer: {e}\n")
+
+    try:
+        history_messages = [msg.model_dump(mode="json") for msg in agent.history]
+        history_path = os.path.join(log_dir, "nexau_history.json")
+        history_tmp = history_path + ".tmp"
+        with open(history_tmp, "w") as f:
+            json.dump(history_messages, f, indent=2, ensure_ascii=False)
+        os.replace(history_tmp, history_path)
+    except Exception as e:
+        sys.stderr.write(f"[nexau-harbor] failed to flush history: {e}\n")
+
+
+def _periodic_tracer_flush(stop_event: threading.Event):
+    """Background thread: flush tracer to disk every TRACER_FLUSH_INTERVAL_SEC."""
+    while not stop_event.wait(TRACER_FLUSH_INTERVAL_SEC):
+        _dump_tracer_to_disk()
+
+
+def _save_tracer_on_exit():
+    """Final dump on exit (atexit / signal handler)."""
+    if _tracer_save_state["saved"]:
+        return
+    _dump_tracer_to_disk()
+    _tracer_save_state["saved"] = True
+
+
+def _signal_handler(signum, frame):
+    """Handle SIGTERM/SIGINT: save tracer then exit."""
+    _save_tracer_on_exit()
+    sys.exit(128 + signum)
 
 
 # Constants matching gemini-cli
@@ -312,6 +369,20 @@ def cmd_run(args):
         sys.path.insert(0, config_dir)
 
     agent = load_agent_config(args.config_path)
+
+    _tracer_save_state["agent"] = agent
+    _tracer_save_state["log_dir"] = args.log_dir_path
+    _tracer_save_state["saved"] = False
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+    atexit.register(_save_tracer_on_exit)
+
+    flush_stop = threading.Event()
+    flush_thread = threading.Thread(
+        target=_periodic_tracer_flush, args=(flush_stop,), daemon=True
+    )
+    flush_thread.start()
+
     result = agent.run(
         message=args.query,
         context={
@@ -319,11 +390,10 @@ def cmd_run(args):
         }
     )
 
-    for tracer in agent.config.tracers:
-        if isinstance(tracer, InMemoryTracer):
-            with open(args.log_dir_path+"/nexau_in_memory_tracer.json", "w") as f:
-                json.dump(tracer.dump_traces(), f, indent=2, ensure_ascii=False)
-            break
+    flush_stop.set()
+    flush_thread.join(timeout=2)
+    _save_tracer_on_exit()
+
     print("Agent 运行完成!")
     return 0
 
