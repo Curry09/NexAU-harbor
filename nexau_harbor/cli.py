@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from nexau.archs.config.config_loader import load_agent_config
 from nexau.archs.tracer.adapters.in_memory import InMemoryTracer
+from nexau_harbor.merge_trace import merge_tracer_data
 import json
 
 
@@ -33,10 +34,12 @@ def _dump_tracer_to_disk():
     try:
         for tracer in agent.config.tracers:
             if isinstance(tracer, InMemoryTracer):
+                traces = tracer.dump_traces()
+                traces = merge_tracer_data(traces)
                 path = os.path.join(log_dir, "nexau_in_memory_tracer.json")
                 tmp_path = path + ".tmp"
                 with open(tmp_path, "w") as f:
-                    json.dump(tracer.dump_traces(), f, indent=2, ensure_ascii=False)
+                    json.dump(traces, f, indent=2, ensure_ascii=False)
                 os.replace(tmp_path, path)
                 break
     except Exception as e:
