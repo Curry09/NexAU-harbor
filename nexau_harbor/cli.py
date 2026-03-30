@@ -16,11 +16,12 @@ from dataclasses import dataclass, field
 from typing import Optional
 from nexau.archs.config.config_loader import load_agent_config
 from nexau.archs.tracer.adapters.in_memory import InMemoryTracer
-from nexau_harbor.merge_trace import merge_tracer_data
+from nexau_harbor.trace_converter import extract_trace_data_from_inmemory_dump
 import json
 
 
 _tracer_save_state: dict = {"agent": None, "log_dir": None, "saved": False}
+_tracer_flush_lock = threading.Lock()
 
 TRACER_FLUSH_INTERVAL_SEC = 60
 
@@ -31,29 +32,30 @@ def _dump_tracer_to_disk():
     log_dir = _tracer_save_state.get("log_dir")
     if agent is None or log_dir is None:
         return
+    if not _tracer_flush_lock.acquire(blocking=False):
+        return
     try:
         for tracer in agent.config.tracers:
             if isinstance(tracer, InMemoryTracer):
-                traces = tracer.dump_traces()
-                traces = merge_tracer_data(traces)
-                path = os.path.join(log_dir, "nexau_in_memory_tracer.json")
+                raw_spans = tracer.dump_traces()
+                cleaned = extract_trace_data_from_inmemory_dump(
+                    raw_spans,
+                    include_system_prompt_message=True,
+                    include_user_message=True,
+                    capture_errors=True,
+                    jsonable_output=True,
+                )
+                path = os.path.join(log_dir, "nexau_in_memory_tracer.cleaned.json")
                 tmp_path = path + ".tmp"
                 with open(tmp_path, "w") as f:
-                    json.dump(traces, f, indent=2, ensure_ascii=False)
+                    json.dump(cleaned, f, indent=2, ensure_ascii=False)
                 os.replace(tmp_path, path)
                 break
     except Exception as e:
         sys.stderr.write(f"[nexau-harbor] failed to flush tracer: {e}\n")
+    finally:
+        _tracer_flush_lock.release()
 
-    try:
-        history_messages = [msg.model_dump(mode="json") for msg in agent.history]
-        history_path = os.path.join(log_dir, "nexau_history.json")
-        history_tmp = history_path + ".tmp"
-        with open(history_tmp, "w") as f:
-            json.dump(history_messages, f, indent=2, ensure_ascii=False)
-        os.replace(history_tmp, history_path)
-    except Exception as e:
-        sys.stderr.write(f"[nexau-harbor] failed to flush history: {e}\n")
 
 
 def _periodic_tracer_flush(stop_event: threading.Event):
